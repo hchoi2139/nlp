@@ -18,15 +18,15 @@ nlp = spacy.load("en_core_web_sm")
 print("Loading Data...")
 # --- Load Binary Data ---
 # Note: Ensure these file paths match your local setup
-filepath_pcl = 'dontpatronizeme_pcl.tsv'
+filepath_pcl = '../data/dontpatronizeme_pcl.tsv'
 df_pcl = pd.read_csv(filepath_pcl, sep='\t', skiprows=4, header=None, 
                      names=['par_id', 'art_id', 'keyword', 'country', 'text', 'label'])
 df_pcl = df_pcl.dropna(subset=['text', 'label'])
 df_pcl['par_id'] = df_pcl['par_id'].astype(str)
 
 # Load official splits
-df_train_split = pd.read_csv('practice-splits/train_semeval_parids-labels.csv')
-df_dev_split = pd.read_csv('practice-splits/dev_semeval_parids-labels.csv')
+df_train_split = pd.read_csv('../data/practice-splits/train_semeval_parids-labels.csv')
+df_dev_split = pd.read_csv('../data/practice-splits/dev_semeval_parids-labels.csv')
 official_ids = set(df_train_split['par_id'].astype(str).tolist() + df_dev_split['par_id'].astype(str).tolist())
 
 # Filter for official split & Apply Label 2+3+4 mapping
@@ -35,7 +35,7 @@ df_official['label'] = pd.to_numeric(df_official['label'], errors='coerce')
 df_official['binary_label'] = df_official['label'].apply(lambda x: 1 if x >= 2 else 0)
 
 # --- Load Category Data for Semantic Analysis ---
-filepath_cat = 'dontpatronizeme_categories.tsv'
+filepath_cat = '../data/dontpatronizeme_categories.tsv'
 df_cat = pd.read_csv(filepath_cat, sep='\t', skiprows=3, header=None,
                      names=['par_id', 'art_id', 'text', 'keyword', 'country', 
                             'span_start', 'span_end', 'span_text', 'category', 'num_annotators'])

@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 
 # Load Binary Data
-filepath_pcl = 'dontpatronizeme_pcl.tsv'
+filepath_pcl = '../data/dontpatronizeme_pcl.tsv'
 df_pcl = pd.read_csv(filepath_pcl, sep='\t', skiprows=4, header=None, 
                      names=['par_id', 'art_id', 'keyword', 'country', 'text', 'label'])
 df_pcl = df_pcl.dropna(subset=['text', 'label'])
