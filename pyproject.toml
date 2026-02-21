@@ -8,6 +8,7 @@ dependencies = [
     "en-core-web-sm",
     "matplotlib>=3.10.8",
     "numpy<2.0.0",
+    "optuna>=4.7.0",
     "pandas<3.0.0",
     "protobuf>=6.33.5",
     "scikit-learn>=1.8.0",
