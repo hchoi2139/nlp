@@ -6,14 +6,16 @@ from sklearn.metrics import f1_score, precision_score, recall_score, classificat
 
 # Ensure Python can find the src package
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-sys.path.append(project_root)
+if project_root not in sys.path:
+    sys.path.append(project_root)
 
 from src.data_loader import get_dataloader
 from src.model import PCLModelWithLAN
 
 def evaluate_model():
-    print("--- INITIALIZING EVALUATION PIPELINE ---")
-    #device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print("--- INITIALIZING EVALUATION ON OFFICIAL DEV SPLIT ---")
+    
+    # Keep it on CPU to bypass Slurm GPU locks on the login node
     device = torch.device('cpu')
     print(f"Evaluating on device: {device}")
 
@@ -21,11 +23,11 @@ def evaluate_model():
     data_path = 'data/dontpatronizeme_pcl.tsv'
     cat_path = 'data/dontpatronizeme_categories.tsv'
     
-    # Note: If you eventually split your data into train/val, make sure you pass the val path here!
-    val_loader, _ = get_dataloader(data_path, cat_path, batch_size=16)
+    # Correctly unpack all three variables, isolating the val_loader
+    _, val_loader, _ = get_dataloader(data_path, cat_path, batch_size=16)
 
-    # Initialize the architecture and force FP32 (just like in training)
-    model = PCLModelWithLAN().to(device).float()
+    # Initialize the architecture and force FP32 (to match training)
+    model = PCLModelWithLAN().float().to(device)
     
     # Locate the best model weights
     checkpoint_path = '/vol/bitbucket/hc1721/nlp_scratch/checkpoints/best_model.pth'
@@ -38,7 +40,7 @@ def evaluate_model():
     checkpoint = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint['state_dict'])
     
-    # Put model in evaluation mode (turns off dropout, etc.)
+    # Put model in evaluation mode (turns off dropout)
     model.eval()
     
     all_preds = []
@@ -63,11 +65,9 @@ def evaluate_model():
             all_preds.extend(preds)
             all_labels.extend(labels)
 
-    
-    
     # Calculate Final Metrics
     print("\n" + "="*50)
-    print("                 FINAL RESULTS")
+    print("                 OFFICIAL DEV RESULTS")
     print("="*50)
     
     f1 = f1_score(all_labels, all_preds)

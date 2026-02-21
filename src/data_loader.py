@@ -88,15 +88,30 @@ def get_dataloader(data_filepath, categories_filepath=None, tokenizer_name="micr
         except Exception as e:
             print(f"Warning: Could not merge taxonomy categories. Error: {e}")
 
-    class_counts = df['label'].value_counts().sort_index().values
+    print("Loading official practice splits...")
+    train_split_df = pd.read_csv('data/practice-splits/train_semeval_parids-labels.csv')
+    dev_split_df = pd.read_csv('data/practice-splits/dev_semeval_parids-labels.csv')
+
+    train_ids = set(train_split_df['par_id'].astype(str).tolist())
+    dev_ids = set(dev_split_df['par_id'].astype(str).tolist())
+
+    train_df = df[df['par_id'].isin(train_ids)].copy().reset_index(drop=True)
+    val_df = df[df['par_id'].isin(dev_ids)].copy().reset_index(drop=True)
+
+    print(f"Data Split Complete: {len(train_df)} Train | {len(val_df)} Val")
+    
+    class_counts = train_df['label'].value_counts().sort_index().values
     class_weights = 1.0 / class_counts
-    sample_weights = [class_weights[l] for l in df['label'].values]
+    sample_weights = [class_weights[l] for l in train_df['label'].values]
     sampler = WeightedRandomSampler(weights=sample_weights, num_samples=len(sample_weights), replacement=True)
     
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
-    dataset = PCLDataset(df, tokenizer, max_length=256)
+    train_dataset = PCLDataset(train_df, tokenizer, max_length=256)
+    val_dataset = PCLDataset(val_df, tokenizer, max_length=256)
     collate_fn = DataCollatorWithPadding(tokenizer=tokenizer)
     
-    dataloader = DataLoader(dataset, batch_size=batch_size, sampler=sampler, collate_fn=collate_fn)
-    print(f"Pipeline Ready! Filtered dataset size: {len(df)}")
-    return dataloader, tokenizer
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=sampler, collate_fn=collate_fn)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
+
+    print("Pipeline Ready!")
+    return train_loader, val_loader, tokenizer

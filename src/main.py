@@ -12,27 +12,6 @@ sys.path.append(project_root)
 from src.data_loader import get_dataloader
 from src.model import PCLModelWithLAN
 
-# --- 1. STABLE FOCAL LOSS ---
-class FocalLoss(nn.Module):
-    def __init__(self, alpha=0.75, gamma=2.0):
-        super().__init__()
-        self.alpha = alpha
-        self.gamma = gamma
-
-    def forward(self, logits, targets):
-        logits = logits.view(-1)
-        targets = targets.view(-1).float()
-        
-        # Use built-in BCE with logits for perfect numerical stability
-        log_pt = -F.binary_cross_entropy_with_logits(logits, targets, reduction='none')
-        pt = torch.exp(log_pt)
-        
-        focal_loss = -self.alpha * ((1 - pt) ** self.gamma) * log_pt
-        return focal_loss.mean()
-
-# ==========================================
-# 2. TRAINING LOOP
-# ==========================================
 def train_model():
     print("--- INITIALIZING PCL TRAINING PIPELINE ---")
     
@@ -42,7 +21,7 @@ def train_model():
     data_path = 'data/dontpatronizeme_pcl.tsv'
     cat_path = 'data/dontpatronizeme_categories.tsv'
     
-    train_loader, _ = get_dataloader(data_path, cat_path, batch_size=16)
+    train_loader, val_loader, _ = get_dataloader(data_path, cat_path, batch_size=16)
 
     # --- 2. THE MIXED PRECISION FIX ---
     # Force the model into FP32 to prevent epsilon division-by-zero
@@ -50,7 +29,8 @@ def train_model():
     
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5, weight_decay=0.01)
     
-    criterion_binary = FocalLoss(alpha=0.75, gamma=2.0)
+    #criterion_binary = FocalLoss(alpha=0.75, gamma=2.0)
+    criterion_binary = nn.BCEWithLogitsLoss()
     criterion_taxonomy = nn.BCEWithLogitsLoss()
 
     epochs = 3
