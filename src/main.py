@@ -12,38 +12,55 @@ sys.path.append(project_root)
 from src.data_loader import get_dataloader
 from src.model import PCLModelWithLAN
 
+def compute_kl_loss(logits1, logits2):
+    """Calculates symmetric KL Divergence for binary logits."""
+    p = torch.sigmoid(logits1)
+    q = torch.sigmoid(logits2)
+    
+    # Prevent log(0) with a tiny epsilon
+    eps = 1e-8
+    
+    # KL(p || q)
+    kl_p_q = p * torch.log(p / (q + eps) + eps) + (1 - p) * torch.log((1 - p) / (1 - q + eps) + eps)
+    # KL(q || p)
+    kl_q_p = q * torch.log(q / (p + eps) + eps) + (1 - q) * torch.log((1 - q) / (1 - p + eps) + eps)
+    
+    # Symmetric average
+    return torch.mean(kl_p_q + kl_q_p) / 2
+
 def get_optimizer_grouped_parameters(model, base_lr=1e-5, weight_decay=0.01):
     no_decay = ["bias", "LayerNorm.weight"]
     
-    # We create distinct learning zones
+    zone1_params = [] # Slow learning
+    zone2_params = [] # Standard learning
+    zone3_params = [] # Fast learning
+    zone4_params = [] # No weight decay
+    
+    for n, p in model.named_parameters():
+        # 1. Filter out biases and LayerNorms first (Zone 4)
+        if any(nd in n for nd in no_decay):
+            zone4_params.append(p)
+            continue
+            
+        # 2. Custom Head & LAN (Zone 3)
+        # We check this FIRST so "label_embeddings" gets caught here 
+        # and doesn't fall down into the Zone 1 "embeddings" check.
+        if "head" in n or "label_attention" in n or "label_embeddings" in n:
+            zone3_params.append(p)
+            
+        # 3. Lower Layers & Base Embeddings (Zone 1)
+        elif "embeddings" in n or any(f"layer.{i}." in n for i in range(4)):
+            zone1_params.append(p)
+            
+        # 4. Middle/High Layers & Anything Else (Zone 2)
+        else:
+            zone2_params.append(p)
+
     optimizer_grouped_parameters = [
-        # Zone 1: Lower Layers (Slow Learning - preserve pre-trained syntax)
-        {
-            "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay) 
-                       and ("embeddings" in n or any(f"layer.{i}." in n for i in range(4)))],
-            "weight_decay": weight_decay,
-            "lr": base_lr * 0.1, # 1e-6
-        },
-        # Zone 2: Middle and High Layers (Standard Learning - semantics)
-        {
-            "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay) 
-                       and any(f"layer.{i}." in n for i in range(4, 12))],
-            "weight_decay": weight_decay,
-            "lr": base_lr, # 1e-5
-        },
-        # Zone 3: Custom Head & Label Attention (Fast Learning - task specific)
-        {
-            "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay) 
-                       and ("head" in n or "label_attention" in n or "label_embeddings" in n)],
-            "weight_decay": weight_decay,
-            "lr": base_lr * 5, # 5e-5
-        },
-        # Zone 4: Biases and LayerNorm (No Weight Decay for stability)
-        {
-            "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
-            "weight_decay": 0.0,
-            "lr": base_lr,
-        },
+        {"params": zone1_params, "weight_decay": weight_decay, "lr": base_lr * 0.1},
+        {"params": zone2_params, "weight_decay": weight_decay, "lr": base_lr},
+        {"params": zone3_params, "weight_decay": weight_decay, "lr": base_lr * 5},
+        {"params": zone4_params, "weight_decay": 0.0, "lr": base_lr},
     ]
     return optimizer_grouped_parameters
 
@@ -60,7 +77,7 @@ def train_model():
 
     # --- 2. THE MIXED PRECISION FIX ---
     # Force the model into FP32 to prevent epsilon division-by-zero
-    model = PCLModelWithLAN().to(device).float()
+    model = PCLModelWithLAN().float().to(device)
     
     grouped_params = get_optimizer_grouped_parameters(model, base_lr=1e-5, weight_decay=0.01)
     optimizer = torch.optim.AdamW(grouped_params)
@@ -94,12 +111,22 @@ def train_model():
             
             optimizer.zero_grad()
             
-            binary_logits, taxonomy_logits = model(input_ids, attention_mask)
+            # R-Drop
+            binary_logits1, taxonomy_logits1 = model(input_ids, attention_mask)
+            binary_logits2, taxonomy_logits2 = model(input_ids, attention_mask)
+
+            loss_bce1 = criterion_binary(binary_logits1, labels)
+            loss_bce2 = criterion_binary(binary_logits2, labels)
+            loss_binary = 0.5 * (loss_bce1 + loss_bce2)
+
+            kl_alpha = 1.0
+            loss_kl = compute_kl_loss(binary_logits1, binary_logits2)
+
+            loss_tax1 = criterion_taxonomy(taxonomy_logits1, taxonomy_labels)
+            loss_tax2 = criterion_taxonomy(taxonomy_logits2, taxonomy_labels)
+            loss_taxonomy = 0.5 * (loss_tax1 + loss_tax2)
             
-            loss_binary = criterion_binary(binary_logits, labels)
-            loss_taxonomy = criterion_taxonomy(taxonomy_logits, taxonomy_labels)
-            
-            loss = loss_binary + (mtl_weight * loss_taxonomy)
+            loss = loss_binary + (kl_alpha * loss_kl) + (mtl_weight * loss_taxonomy)
             
             loss.backward()
             

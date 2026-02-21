@@ -16,7 +16,7 @@ def evaluate_model():
     print("--- INITIALIZING EVALUATION ON OFFICIAL DEV SPLIT ---")
     
     # Keep it on CPU to bypass Slurm GPU locks on the login node
-    device = torch.device('cpu')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Evaluating on device: {device}")
 
     # Load Data 
