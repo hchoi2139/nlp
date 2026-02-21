@@ -1,0 +1,84 @@
+import os
+import sys
+import torch
+from tqdm import tqdm
+from sklearn.metrics import f1_score, precision_score, recall_score, classification_report
+
+# Ensure Python can find the src package
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.append(project_root)
+
+from src.data_loader import get_dataloader
+from src.model import PCLModelWithLAN
+
+def evaluate_model():
+    print("--- INITIALIZING EVALUATION PIPELINE ---")
+    #device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cpu')
+    print(f"Evaluating on device: {device}")
+
+    # Load Data 
+    data_path = 'data/dontpatronizeme_pcl.tsv'
+    cat_path = 'data/dontpatronizeme_categories.tsv'
+    
+    # Note: If you eventually split your data into train/val, make sure you pass the val path here!
+    val_loader, _ = get_dataloader(data_path, cat_path, batch_size=16)
+
+    # Initialize the architecture and force FP32 (just like in training)
+    model = PCLModelWithLAN().to(device).float()
+    
+    # Locate the best model weights
+    checkpoint_path = '/vol/bitbucket/hc1721/nlp_scratch/checkpoints/best_model.pth'
+    if not os.path.exists(checkpoint_path):
+        print(f"🚨 ERROR: No checkpoint found at {checkpoint_path}")
+        print("Did the training script finish successfully?")
+        return
+        
+    print(f"Loading weights from {checkpoint_path}...")
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    model.load_state_dict(checkpoint['state_dict'])
+    
+    # Put model in evaluation mode (turns off dropout, etc.)
+    model.eval()
+    
+    all_preds = []
+    all_labels = []
+
+    print("\n--- STARTING INFERENCE ---")
+    with torch.no_grad(): # No need to calculate gradients for evaluation
+        for batch in tqdm(val_loader, desc="Evaluating"):
+            input_ids = batch['input_ids'].to(device)
+            attention_mask = batch['attention_mask'].to(device)
+            
+            # Keep labels on CPU for sklearn
+            labels = batch['labels'].numpy() 
+            
+            # Forward pass
+            binary_logits, _ = model(input_ids, attention_mask)
+            
+            # Convert logits to binary predictions
+            # Because we used BCEWithLogitsLoss, a logit > 0 means probability > 0.5
+            preds = (binary_logits > 0).cpu().numpy().astype(int)
+            
+            all_preds.extend(preds)
+            all_labels.extend(labels)
+
+    
+    
+    # Calculate Final Metrics
+    print("\n" + "="*50)
+    print("                 FINAL RESULTS")
+    print("="*50)
+    
+    f1 = f1_score(all_labels, all_preds)
+    precision = precision_score(all_labels, all_preds)
+    recall = recall_score(all_labels, all_preds)
+    
+    print(f"Binary F1-Score : {f1:.4f}")
+    print(f"Precision       : {precision:.4f}")
+    print(f"Recall          : {recall:.4f}")
+    print("\nDetailed Classification Report:")
+    print(classification_report(all_labels, all_preds, target_names=['Not Patronizing', 'Patronizing']))
+
+if __name__ == "__main__":
+    evaluate_model()
