@@ -4,11 +4,10 @@ import json
 import torch
 import torch.nn as nn
 import numpy as np
-import pandas as pd
 from tqdm import tqdm
 from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import f1_score
-from torch.utils.data import DataLoader, WeightedRandomSampler
+from torch.utils.data import DataLoader, WeightedRandomSampler, Subset
 from transformers import AutoTokenizer, DataCollatorWithPadding, get_cosine_schedule_with_warmup
 
 # Ensure Python can find the src package
@@ -16,9 +15,8 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-# Import your custom architecture and dataset class
 from src.model import PCLModelWithLAN
-from src.data_loader import PCLDataset 
+from src.data_loader import get_dataloader  # We use your bulletproof data loader
 
 class EarlyStopping:
     def __init__(self, patience=3, delta=0.01):
@@ -69,9 +67,8 @@ def get_optimizer_grouped_parameters(model, base_lr=1e-5, weight_decay=0.01):
     ]
 
 def train_kfold():
-    print("--- INITIALIZING 5-FOLD PIPELINE WITH OPTUNA RECIPE ---")
+    print("--- INITIALIZING STRICTLY ISOLATED 5-FOLD PIPELINE ---")
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Training on device: {device}")
     
     # --- DYNAMIC OPTUNA LOADING ---
     optuna_path = '/vol/bitbucket/hc1721/nlp_scratch/optuna_study/best_hyperparameters.json'
@@ -83,51 +80,54 @@ def train_kfold():
     BEST_WARMUP = best_params['warmup_ratio']
     BEST_KL = best_params['kl_alpha']
     BEST_MTL = best_params['mtl_weight']
-    print(f"Loaded Hyperparameters: LR={BEST_LR:.2e}, WD={BEST_WD:.4f}, KL={BEST_KL:.2f}")
-
-    # --- 1. PREPARE FULL DATASET ---
-    df = pd.read_csv('data/dontpatronizeme_pcl.tsv', sep='\t', names=['par_id', 'art_id', 'keyword', 'country', 'text', 'label'], skiprows=4)
-    df['label'] = df['label'].apply(lambda x: 1 if int(x) > 1 else 0)
-
-    df = df.dropna(subset=['text'])
-    df['text'] = df['text'].astype(str)
     
-    # Using your exact placeholder logic that bypasses the KeyError
-    if 'taxonomy_labels' not in df.columns:
-         df['taxonomy_labels'] = [np.zeros(7) for _ in range(len(df))]
-
-    # --- 2. TOKENIZER & COLLATOR SETUP ---
+    # --- 1. STRICT ISOLATION DATA LOADING ---
+    data_path = 'data/dontpatronizeme_pcl.tsv'
+    cat_path = 'data/dontpatronizeme_categories.tsv'
+    
+    # Your dataloader perfectly isolates the Train and Dev splits
+    train_loader_base, _, _ = get_dataloader(data_path, cat_path, batch_size=16)
+    
+    # We extract STRICTLY the official 8,329 training dataset
+    train_dataset_strictly_isolated = train_loader_base.dataset
+    
     tokenizer = AutoTokenizer.from_pretrained("microsoft/deberta-v3-base")
     data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
+    
+    print("Extracting labels from the isolated training set for K-Fold stratification...")
+    labels = []
+    for i in tqdm(range(len(train_dataset_strictly_isolated)), desc="Parsing Labels"):
+        val = train_dataset_strictly_isolated[i]['labels']
+        labels.append(val.item() if isinstance(val, torch.Tensor) else int(val))
+    labels = np.array(labels, dtype=int)
     
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     
     checkpoint_dir = '/vol/bitbucket/hc1721/nlp_scratch/checkpoints/kfold'
     os.makedirs(checkpoint_dir, exist_ok=True)
-    
     fold_metrics = {}
 
     # --- 3. K-FOLD LOOP ---
-    for fold, (train_idx, val_idx) in enumerate(skf.split(df, df['label'])):
+    # We split strictly the labels array of the 8,329 Train set
+    for fold, (train_idx, val_idx) in enumerate(skf.split(np.zeros(len(labels)), labels)):
         print(f"\n========================================")
         print(f"               FOLD {fold + 1}/5")
         print(f"========================================")
         
-        train_df = df.iloc[train_idx].reset_index(drop=True)
-        val_df = df.iloc[val_idx].reset_index(drop=True)
+        # Subsets created strictly from the isolated training data
+        train_sub = Subset(train_dataset_strictly_isolated, train_idx)
+        val_sub = Subset(train_dataset_strictly_isolated, val_idx)
         
         # Strategic Over-Sampling
-        class_counts = train_df['label'].value_counts().sort_index().values
+        train_labels = labels[train_idx]
+        class_counts = np.bincount(train_labels)
         class_weights = 1.0 / class_counts
-        sample_weights = [class_weights[label] for label in train_df['label']]
+        sample_weights = [class_weights[label] for label in train_labels]
         sampler = WeightedRandomSampler(weights=sample_weights, num_samples=len(sample_weights), replacement=True)
         
-        train_dataset = PCLDataset(train_df, tokenizer, max_length=256)
-        val_dataset = PCLDataset(val_df, tokenizer, max_length=256)
-        
-        # Inject the DataCollator here
-        train_loader = DataLoader(train_dataset, batch_size=16, sampler=sampler, collate_fn=data_collator)
-        val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False, collate_fn=data_collator)
+        # Inject the standard collator
+        train_loader = DataLoader(train_sub, batch_size=16, sampler=sampler, collate_fn=data_collator)
+        val_loader = DataLoader(val_sub, batch_size=16, shuffle=False, collate_fn=data_collator)
         
         # Initialize Model & Optimizer
         model = PCLModelWithLAN().float().to(device)
@@ -150,16 +150,15 @@ def train_kfold():
             loop = tqdm(train_loader, desc=f"Fold {fold+1} - Epoch {epoch+1}")
             for batch in loop:
                 input_ids, attention_mask = batch['input_ids'].to(device), batch['attention_mask'].to(device)
-                labels = batch['labels'].to(device).float()
+                b_labels = batch['labels'].to(device).float()
                 tax_labels = batch['taxonomy_labels'].to(device).float()
                 
                 optimizer.zero_grad()
                 
-                # R-Drop Dual Pass
                 b_logits1, t_logits1 = model(input_ids, attention_mask)
                 b_logits2, t_logits2 = model(input_ids, attention_mask)
                 
-                loss_binary = 0.5 * (criterion_binary(b_logits1, labels) + criterion_binary(b_logits2, labels))
+                loss_binary = 0.5 * (criterion_binary(b_logits1, b_labels) + criterion_binary(b_logits2, b_labels))
                 loss_kl = compute_kl_loss(b_logits1, b_logits2)
                 loss_tax = 0.5 * (criterion_taxonomy(t_logits1, tax_labels) + criterion_taxonomy(t_logits2, tax_labels))
                 
@@ -170,16 +169,16 @@ def train_kfold():
                 scheduler.step()
                 loop.set_postfix(loss=loss.item())
         
-            # Validation Threshold Sweep
+            # Validation
             model.eval()
             all_logits, all_labels = [], []
             with torch.no_grad():
                 for batch in val_loader:
                     input_ids, attention_mask = batch['input_ids'].to(device), batch['attention_mask'].to(device)
-                    labels = batch['labels'].numpy()
+                    b_labels = batch['labels'].numpy()
                     logits, _ = model(input_ids, attention_mask)
                     all_logits.extend(logits.cpu().numpy())
-                    all_labels.extend(labels)
+                    all_labels.extend(b_labels)
                     
             all_logits, all_labels = np.array(all_logits), np.array(all_labels)
             epoch_best_f1, epoch_best_thresh = 0.0, 0.0
@@ -202,22 +201,10 @@ def train_kfold():
                 break
                 
         print(f"⭐ Fold {fold+1} Complete | Optimal Threshold: {best_thresh:.2f} | Validation F1: {best_f1:.4f}")
-        
-        # Save exact threshold to dictionary
         fold_metrics[f"Fold_{fold+1}"] = {"Threshold": float(best_thresh), "F1": float(best_f1)}
 
-    # --- 4. EXPORT JSON & FINAL REPORT ---
     with open(os.path.join(checkpoint_dir, 'fold_thresholds.json'), 'w') as f:
         json.dump(fold_metrics, f, indent=4)
-
-    print("\n" + "="*50)
-    print("           K-FOLD ENSEMBLE COMPLETE")
-    print("="*50)
-    avg_f1 = np.mean([metrics["F1"] for metrics in fold_metrics.values()])
-    for fold, metrics in fold_metrics.items():
-        print(f"{fold}: Threshold = {metrics['Threshold']:.2f}, F1 = {metrics['F1']:.4f}")
-    print(f"\n🏆 Average Validation F1: {avg_f1:.4f}")
-    print(f"📁 Thresholds saved to: {os.path.join(checkpoint_dir, 'fold_thresholds.json')}")
 
 if __name__ == "__main__":
     train_kfold()
