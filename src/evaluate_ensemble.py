@@ -1,13 +1,14 @@
 import os
 import sys
 import json
+import csv
 import torch
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from torch.utils.data import DataLoader, Dataset
 from transformers import AutoTokenizer, DataCollatorWithPadding
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score, classification_report
 
 # Ensure Python can find the src package
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -41,31 +42,42 @@ def evaluate_ensemble():
     
     # 1. Load the exact 2094 true labels and text
     print("Loading official dev set text and labels...")
-    raw_df = pd.read_csv('data/dontpatronizeme_pcl.tsv', sep='\t', skiprows=4, header=None, names=['par_id', 'art_id', 'keyword', 'country', 'text', 'label'])
+    data_path = os.path.join(project_root, 'data', 'dontpatronizeme_pcl.tsv')
+    
+    # ADDED quoting=csv.QUOTE_NONE to prevent Pandas from merging lines with stray quotes
+    raw_df = pd.read_csv(data_path, sep='\t', skiprows=4, header=None, names=['par_id', 'art_id', 'keyword', 'country', 'text', 'label'], quoting=csv.QUOTE_NONE)
     raw_df['par_id'] = raw_df['par_id'].astype(str)
     raw_df['binary_label'] = (raw_df['label'] >= 2).astype(int)
     
-    dev_split_df = pd.read_csv('data/practice-splits/dev_semeval_parids-labels.csv')
+    dev_split_path = os.path.join(project_root, 'data', 'practice-splits', 'dev_semeval_parids-labels.csv')
+    dev_split_df = pd.read_csv(dev_split_path)
     dev_split_df['par_id'] = dev_split_df['par_id'].astype(str)
     
     dev_df = pd.merge(dev_split_df[['par_id']], raw_df[['par_id', 'text', 'binary_label']], on='par_id', how='left')
+    
+    # Sanity check
+    if dev_df['binary_label'].isna().sum() > 0:
+        print(f"WARNING: {dev_df['binary_label'].isna().sum()} labels are missing! Check raw data loading.")
+        
     dev_df['text'] = dev_df['text'].apply(clean_text)
     true_labels = dev_df['binary_label'].fillna(0).astype(int).tolist()
     
     dev_dataset = UnlabeledPCLDataset(dev_df, tokenizer)
     dev_loader = DataLoader(dev_dataset, batch_size=32, shuffle=False, collate_fn=data_collator)
     
-    # 2. Load Thresholds
-    with open('/vol/bitbucket/hc1721/nlp_scratch/checkpoints/kfold/fold_thresholds.json', 'r') as f:
+    # 2. Load Thresholds (ABSOLUTE PATH TO SCRATCH SPACE)
+    thresh_path = '/vol/bitbucket/hc1721/nlp_scratch/checkpoints/kfold/fold_thresholds.json'
+    with open(thresh_path, 'r') as f:
         thresholds = json.load(f)
         
-    all_fold_preds = []  # Store binary predictions for hard voting
-    all_fold_probs = []  # Store probabilities for soft voting
+    all_fold_preds = []  
+    all_fold_probs = []  
     
     model = PCLModelWithLAN().float().to(device)
     
     # 3. Iterate through all 5 models sequentially
     for fold in range(1, 6):
+        # ABSOLUTE PATH TO SCRATCH SPACE
         model_path = f'/vol/bitbucket/hc1721/nlp_scratch/checkpoints/kfold/model_fold_{fold}.pth'
         thresh = thresholds[f'Fold_{fold}']['Threshold']
         print(f"\nEvaluating Fold {fold} (Optimal Threshold: {thresh:.2f})...")
@@ -80,10 +92,11 @@ def evaluate_ensemble():
                 input_ids = batch['input_ids'].to(device)
                 attention_mask = batch['attention_mask'].to(device)
                 logits, _ = model(input_ids, attention_mask)
-                logits = logits.squeeze().cpu().numpy()
                 
-                # Calculate probability and binary prediction
-                probs = 1 / (1 + np.exp(-logits)) # Sigmoid
+                # FIXED: flatten() instead of squeeze()
+                logits = logits.flatten().cpu().numpy() 
+                
+                probs = 1 / (1 + np.exp(-logits))
                 preds = (logits > thresh).astype(int)
                 
                 fold_probs.extend(probs.tolist())
@@ -93,25 +106,28 @@ def evaluate_ensemble():
         all_fold_preds.append(fold_preds)
 
     # 4. Ensembling Logic
-    all_fold_preds = np.array(all_fold_preds) # Shape: (5, 2094)
-    all_fold_probs = np.array(all_fold_probs) # Shape: (5, 2094)
+    all_fold_preds = np.array(all_fold_preds) 
+    all_fold_probs = np.array(all_fold_probs) 
     
-    # Method A: Hard Voting (Majority Rule)
+    # Method A: Hard Voting
     sum_preds = np.sum(all_fold_preds, axis=0)
     hard_ensemble_preds = (sum_preds >= 3).astype(int)
-    hard_f1 = f1_score(true_labels, hard_ensemble_preds, zero_division=0)
+    hard_f1 = f1_score(true_labels, hard_ensemble_preds, pos_label=1, average='binary')
     
-    # Method B: Soft Voting (Average Probability > 0.5)
+    # Method B: Soft Voting
     avg_probs = np.mean(all_fold_probs, axis=0)
     soft_ensemble_preds = (avg_probs > 0.5).astype(int)
-    soft_f1 = f1_score(true_labels, soft_ensemble_preds, zero_division=0)
+    soft_f1 = f1_score(true_labels, soft_ensemble_preds, pos_label=1, average='binary')
     
     print("\n========================================")
     print("        ENSEMBLE RESULTS (OFFICIAL DEV)   ")
     print("========================================")
-    print(f"Single Best Model (Fold 2) F1: 0.4818")
     print(f"Hard Voting (Majority) F1:     {hard_f1:.4f}")
     print(f"Soft Voting (Avg Probs) F1:    {soft_f1:.4f}")
+    print("========================================\n")
+    
+    print("Detailed Hard Voting Classification Report:")
+    print(classification_report(true_labels, hard_ensemble_preds, digits=4))
 
 if __name__ == "__main__":
     evaluate_ensemble()
