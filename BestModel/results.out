@@ -1,0 +1,32 @@
+--- Starting Ensemble Evaluation on A100 ---
+--- INITIALIZING ENSEMBLE EVALUATION ---
+Loading official dev set text and labels...
+
+Evaluating Fold 1 (Optimal Threshold: 2.30)...
+
+Evaluating Fold 2 (Optimal Threshold: 1.40)...
+
+Evaluating Fold 3 (Optimal Threshold: 3.90)...
+
+Evaluating Fold 4 (Optimal Threshold: 2.50)...
+
+Evaluating Fold 5 (Optimal Threshold: 2.00)...
+
+========================================
+        ENSEMBLE RESULTS (OFFICIAL DEV)   
+========================================
+Hard Voting (Majority) F1:     0.5289
+Soft Voting (Avg Probs) F1:    0.4866
+========================================
+
+Detailed Hard Voting Classification Report:
+              precision    recall  f1-score   support
+
+           0     0.9566    0.9303    0.9433      1895
+           1     0.4741    0.5980    0.5289       199
+
+    accuracy                         0.8988      2094
+   macro avg     0.7153    0.7642    0.7361      2094
+weighted avg     0.9107    0.8988    0.9039      2094
+
+--- Ensemble Evaluation Complete ---
