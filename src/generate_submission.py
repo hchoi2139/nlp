@@ -1,3 +1,4 @@
+import csv
 import os
 import sys
 import json
@@ -39,7 +40,7 @@ def generate_ensemble_predictions():
         thresholds = json.load(f)
 
     # 2. Prepare Official Dev Set
-    raw_df = pd.read_csv('data/dontpatronizeme_pcl.tsv', sep='\t', skiprows=4, header=None, names=['par_id', 'art_id', 'keyword', 'country', 'text', 'label'])
+    raw_df = pd.read_csv('data/dontpatronizeme_pcl.tsv', sep='\t', skiprows=4, header=None, names=['par_id', 'art_id', 'keyword', 'country', 'text', 'label'], quoting=csv.QUOTE_NONE)
     raw_df['par_id'] = raw_df['par_id'].astype(str)
     
     dev_split_df = pd.read_csv('data/practice-splits/dev_semeval_parids-labels.csv')
@@ -50,12 +51,16 @@ def generate_ensemble_predictions():
     dev_dataset = UnlabeledPCLDataset(dev_df, tokenizer)
     dev_loader = DataLoader(dev_dataset, batch_size=32, shuffle=False, collate_fn=data_collator)
 
+    print(f"Loaded {len(dev_df)} rows for the Dev set.")
+
     # 3. Prepare Official Test Set
     test_path = 'data/task4_test.tsv'
-    test_df = pd.read_csv(test_path, sep='\t', names=['par_id', 'art_id', 'keyword', 'country', 'text'], skiprows=1)
+    test_df = pd.read_csv(test_path, sep='\t', names=['par_id', 'art_id', 'keyword', 'country', 'text'], quoting=csv.QUOTE_NONE)
     test_df['text'] = test_df['text'].astype(str).apply(clean_text)
     test_dataset = UnlabeledPCLDataset(test_df, tokenizer)
     test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False, collate_fn=data_collator)
+
+    print(f"Loaded {len(test_df)} rows from the test set.")
 
     model = PCLModelWithLAN().float().to(device)
     all_dev_preds = []
