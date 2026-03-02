@@ -66,7 +66,8 @@ def evaluate_ensemble():
     dev_loader = DataLoader(dev_dataset, batch_size=32, shuffle=False, collate_fn=data_collator)
     
     # 2. Load Thresholds (ABSOLUTE PATH TO SCRATCH SPACE)
-    thresh_path = '/vol/bitbucket/hc1721/nlp_scratch/checkpoints/kfold/fold_thresholds.json'
+    #thresh_path = '/vol/bitbucket/hc1721/nlp_scratch/checkpoints/kfold/fold_thresholds.json'
+    thresh_path = os.path.join(project_root, 'BestModel', 'fold_thresholds.json')
     with open(thresh_path, 'r') as f:
         thresholds = json.load(f)
         
@@ -78,7 +79,8 @@ def evaluate_ensemble():
     # 3. Iterate through all 5 models sequentially
     for fold in range(1, 6):
         # ABSOLUTE PATH TO SCRATCH SPACE
-        model_path = f'/vol/bitbucket/hc1721/nlp_scratch/checkpoints/kfold/model_fold_{fold}.pth'
+        #model_path = f'/vol/bitbucket/hc1721/nlp_scratch/checkpoints/kfold/model_fold_{fold}.pth'
+        model_path = os.path.join(project_root, 'BestModel', f'model_fold_{fold}.pth')
         thresh = thresholds[f'Fold_{fold}']['Threshold']
         print(f"\nEvaluating Fold {fold} (Optimal Threshold: {thresh:.2f})...")
         
