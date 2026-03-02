@@ -153,7 +153,7 @@ if __name__ == "__main__":
     study.optimize(objective, n_trials=30)
     
     print("\n" + "="*50)
-    print("🏆 OPTIMIZATION COMPLETE")
+    print("OPTIMIZATION COMPLETE")
     print("="*50)
     print("Best Trial:")
     trial = study.best_trial

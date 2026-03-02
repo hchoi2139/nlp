@@ -106,7 +106,7 @@ def generate_ensemble_predictions():
     with open(os.path.join(output_dir, 'test.txt'), 'w') as f:
         for p in final_test_preds: f.write(f"{p}\n")
         
-    print(f"\n✅ SUCCESS! Saved {len(final_dev_preds)} Dev and {len(final_test_preds)} Test predictions using Hard Voting.")
+    print(f"\nSUCCESS! Saved {len(final_dev_preds)} Dev and {len(final_test_preds)} Test predictions using Hard Voting.")
 
 if __name__ == "__main__":
     generate_ensemble_predictions()

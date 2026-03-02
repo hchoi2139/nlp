@@ -23,7 +23,7 @@ def verify():
     # 4. Load your predictions
     dev_txt_path = 'BestModel/dev.txt'
     if not os.path.exists(dev_txt_path):
-        print(f"❌ ERROR: {dev_txt_path} not found!")
+        print(f"ERROR: {dev_txt_path} not found!")
         return
         
     with open(dev_txt_path, 'r') as f:
@@ -31,12 +31,12 @@ def verify():
         
     # 5. Verify lengths match
     if len(preds) != len(true_labels):
-        print(f"❌ ERROR: Length mismatch! True labels: {len(true_labels)}, Predictions: {len(preds)}")
+        print(f"ERROR: Length mismatch! True labels: {len(true_labels)}, Predictions: {len(preds)}")
         return
         
     # 6. Calculate True Global F1 Score
     f1 = f1_score(true_labels, preds, zero_division=0)
-    print(f"\n✅ Verification Complete!")
+    print(f"\nVerification Complete!")
     print(f"Total Dev Examples: {len(preds)} (Matches Official Spec!)")
     print(f"True Global Dev F1 Score: {f1:.4f}")
 

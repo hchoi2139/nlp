@@ -158,9 +158,9 @@ def train_model():
             best_loss = avg_loss
             best_path = os.path.join(checkpoint_dir, 'best_model.pth')
             torch.save(checkpoint_state, best_path)
-            print(f"⭐ New best model saved to {best_path}")
+            print(f"New best model saved to {best_path}")
 
-    print("\n🏆 TRAINING COMPLETE AND WEIGHTS SAVED!")
+    print("\nTRAINING COMPLETE AND WEIGHTS SAVED!")
 
 if __name__ == "__main__":
     train_model()

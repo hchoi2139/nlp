@@ -200,7 +200,7 @@ def train_kfold():
                 print(f"Early stopping triggered at Epoch {epoch+1}!")
                 break
                 
-        print(f"⭐ Fold {fold+1} Complete | Optimal Threshold: {best_thresh:.2f} | Validation F1: {best_f1:.4f}")
+        print(f"Fold {fold+1} Complete | Optimal Threshold: {best_thresh:.2f} | Validation F1: {best_f1:.4f}")
         fold_metrics[f"Fold_{fold+1}"] = {"Threshold": float(best_thresh), "F1": float(best_f1)}
 
     with open(os.path.join(checkpoint_dir, 'fold_thresholds.json'), 'w') as f:
