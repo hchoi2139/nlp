@@ -29,6 +29,10 @@ After installation, open a new terminal so `uv` is on your `PATH`.
 Do **not** run `python` or `pip` directly. Always run scripts through `uv run` so dependencies
 and environments are handled automatically. If you want to add a new dependency, you can use `uv add`. This will add the dependency to `pyproject.toml`, update `uv.lock`, and install the package into your virtual environment.
 
+### If you have to use pip
+
+You can install the dependencies using standard pip by `pip install -r requirements.txt`, but I strongly recommend using `uv sync`.
+
 ## Reproducing the Best Model (5-Fold LAN Ensemble)
 
 The proposed architecture utilizes a 5-Fold Hard Voting Ensemble. To reproduce the evaluation results on the official Dev Set, please follow these steps:
